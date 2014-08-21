@@ -1,7 +1,7 @@
 /*
  *  Error message information
  *
- *  Copyright (C) 2006-2012, Brainspark B.V.
+ *  Copyright (C) 2006-2014, Brainspark B.V.
  *
  *  This file is part of PolarSSL (http://www.polarssl.org)
  *  Lead Maintainer: Paul Bakker <polarssl_maintainer at polarssl.org>
@@ -23,7 +23,15 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
+#if !defined(POLARSSL_CONFIG_FILE)
 #include "polarssl/config.h"
+#else
+#include POLARSSL_CONFIG_FILE
+#endif
+
+#if defined(POLARSSL_ERROR_C) || defined(POLARSSL_ERROR_STRERROR_DUMMY)
+#include "polarssl/error.h"
+#endif
 
 #if defined(POLARSSL_ERROR_C)
 
@@ -31,17 +39,23 @@ HEADER_INCLUDED
 
 #include <string.h>
 
-#if defined _MSC_VER && !defined  snprintf
+#if defined(_MSC_VER) && !defined  snprintf && !defined(EFIX64) && \
+    !defined(EFI32)
 #define  snprintf  _snprintf
 #endif
 
-void error_strerror( int ret, char *buf, size_t buflen )
+void polarssl_strerror( int ret, char *buf, size_t buflen )
 {
     size_t len;
     int use_ret;
 
+    if( buflen == 0 )
+        return;
+
     memset( buf, 0x00, buflen );
-     
+    /* Reduce buflen to make sure MSVC _snprintf() ends with \0 as well */
+    buflen -= 1;
+
     if( ret < 0 )
         ret = -ret;
 
@@ -51,7 +65,10 @@ void error_strerror( int ret, char *buf, size_t buflen )
 
         // High level error codes
         //
+        // BEGIN generated code
 HIGH_LEVEL_CODE_CHECKS
+        // END generated code
+
         if( strlen( buf ) == 0 )
             snprintf( buf, buflen, "UNKNOWN ERROR CODE (%04X)", use_ret );
     }
@@ -79,11 +96,46 @@ HIGH_LEVEL_CODE_CHECKS
 
     // Low level error codes
     //
+    // BEGIN generated code
 LOW_LEVEL_CODE_CHECKS
+    // END generated code
+
     if( strlen( buf ) != 0 )
         return;
 
     snprintf( buf, buflen, "UNKNOWN ERROR CODE (%04X)", use_ret );
 }
+
+#if defined(POLARSSL_ERROR_STRERROR_BC)
+void error_strerror( int ret, char *buf, size_t buflen )
+{
+    polarssl_strerror( ret, buf, buflen );
+}
+#endif /* POLARSSL_ERROR_STRERROR_BC */
+
+#else /* POLARSSL_ERROR_C */
+
+#if defined(POLARSSL_ERROR_STRERROR_DUMMY)
+
+#include <string.h>
+
+/*
+ * Provide an non-function in case POLARSSL_ERROR_C is not defined
+ */
+void polarssl_strerror( int ret, char *buf, size_t buflen )
+{
+    ((void) ret);
+
+    if( buflen > 0 )
+        buf[0] = '\0';
+}
+
+#if defined(POLARSSL_ERROR_STRERROR_BC)
+void error_strerror( int ret, char *buf, size_t buflen )
+{
+    polarssl_strerror( ret, buf, buflen );
+}
+#endif /* POLARSSL_ERROR_STRERROR_BC */
+#endif /* POLARSSL_ERROR_STRERROR_DUMMY */
 
 #endif /* POLARSSL_ERROR_C */

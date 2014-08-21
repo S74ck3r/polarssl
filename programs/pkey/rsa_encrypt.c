@@ -23,14 +23,14 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#ifndef _CRT_SECURE_NO_DEPRECATE
-#define _CRT_SECURE_NO_DEPRECATE 1
+#if !defined(POLARSSL_CONFIG_FILE)
+#include "polarssl/config.h"
+#else
+#include POLARSSL_CONFIG_FILE
 #endif
 
 #include <string.h>
 #include <stdio.h>
-
-#include "polarssl/config.h"
 
 #include "polarssl/rsa.h"
 #include "polarssl/entropy.h"
@@ -60,7 +60,7 @@ int main( int argc, char *argv[] )
     ctr_drbg_context ctr_drbg;
     unsigned char input[1024];
     unsigned char buf[512];
-    char *pers = "rsa_encrypt";
+    const char *pers = "rsa_encrypt";
 
     ret = 1;
 
@@ -80,7 +80,8 @@ int main( int argc, char *argv[] )
 
     entropy_init( &entropy );
     if( ( ret = ctr_drbg_init( &ctr_drbg, entropy_func, &entropy,
-                               (unsigned char *) pers, strlen( pers ) ) ) != 0 )
+                               (const unsigned char *) pers,
+                               strlen( pers ) ) ) != 0 )
     {
         printf( " failed\n  ! ctr_drbg_init returned %d\n", ret );
         goto exit;
@@ -151,6 +152,8 @@ int main( int argc, char *argv[] )
     printf( "\n  . Done (created \"%s\")\n\n", "result-enc.txt" );
 
 exit:
+    ctr_drbg_free( &ctr_drbg );
+    entropy_free( &entropy );
 
 #if defined(_WIN32)
     printf( "  + Press Enter to exit this program.\n" );

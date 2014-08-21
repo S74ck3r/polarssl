@@ -3,7 +3,7 @@
  *
  * \brief MD2 message digest algorithm (hash function)
  *
- *  Copyright (C) 2006-2010, Brainspark B.V.
+ *  Copyright (C) 2006-2014, Brainspark B.V.
  *
  *  This file is part of PolarSSL (http://www.polarssl.org)
  *  Lead Maintainer: Paul Bakker <polarssl_maintainer at polarssl.org>
@@ -27,9 +27,23 @@
 #ifndef POLARSSL_MD2_H
 #define POLARSSL_MD2_H
 
+#if !defined(POLARSSL_CONFIG_FILE)
+#include "config.h"
+#else
+#include POLARSSL_CONFIG_FILE
+#endif
+
 #include <string.h>
 
 #define POLARSSL_ERR_MD2_FILE_IO_ERROR                 -0x0070  /**< Read/write error in file. */
+
+#if !defined(POLARSSL_MD2_ALT)
+// Regular implementation
+//
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 /**
  * \brief          MD2 context structure
@@ -46,9 +60,19 @@ typedef struct
 }
 md2_context;
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+/**
+ * \brief          Initialize MD2 context
+ *
+ * \param ctx      MD2 context to be initialized
+ */
+void md2_init( md2_context *ctx );
+
+/**
+ * \brief          Clear MD2 context
+ *
+ * \param ctx      MD2 context to be cleared
+ */
+void md2_free( md2_context *ctx );
 
 /**
  * \brief          MD2 context setup
@@ -73,6 +97,18 @@ void md2_update( md2_context *ctx, const unsigned char *input, size_t ilen );
  * \param output   MD2 checksum result
  */
 void md2_finish( md2_context *ctx, unsigned char output[16] );
+
+#ifdef __cplusplus
+}
+#endif
+
+#else  /* POLARSSL_MD2_ALT */
+#include "md2_alt.h"
+#endif /* POLARSSL_MD2_ALT */
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 /**
  * \brief          Output = MD2( input buffer )
@@ -100,7 +136,8 @@ int md2_file( const char *path, unsigned char output[16] );
  * \param key      HMAC secret key
  * \param keylen   length of the HMAC key
  */
-void md2_hmac_starts( md2_context *ctx, const unsigned char *key, size_t keylen );
+void md2_hmac_starts( md2_context *ctx, const unsigned char *key,
+                      size_t keylen );
 
 /**
  * \brief          MD2 HMAC process buffer
@@ -109,7 +146,8 @@ void md2_hmac_starts( md2_context *ctx, const unsigned char *key, size_t keylen 
  * \param input    buffer holding the  data
  * \param ilen     length of the input data
  */
-void md2_hmac_update( md2_context *ctx, const unsigned char *input, size_t ilen );
+void md2_hmac_update( md2_context *ctx, const unsigned char *input,
+                      size_t ilen );
 
 /**
  * \brief          MD2 HMAC final digest
@@ -145,6 +183,9 @@ void md2_hmac( const unsigned char *key, size_t keylen,
  * \return         0 if successful, or 1 if the test failed
  */
 int md2_self_test( int verbose );
+
+/* Internal use */
+void md2_process( md2_context *ctx );
 
 #ifdef __cplusplus
 }

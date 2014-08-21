@@ -24,8 +24,10 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#ifndef _CRT_SECURE_NO_DEPRECATE
-#define _CRT_SECURE_NO_DEPRECATE 1
+#if !defined(POLARSSL_CONFIG_FILE)
+#include "polarssl/config.h"
+#else
+#include POLARSSL_CONFIG_FILE
 #endif
 
 #if defined(_WIN32)
@@ -42,8 +44,6 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <time.h>
-
-#include "polarssl/config.h"
 
 #include "polarssl/cipher.h"
 #include "polarssl/md.h"
@@ -80,6 +80,7 @@ int main( int argc, char *argv[] )
     unsigned char digest[POLARSSL_MD_MAX_SIZE];
     unsigned char buffer[1024];
     unsigned char output[1024];
+    unsigned char diff;
 
     const cipher_info_t *cipher_info;
     const md_info_t *md_info;
@@ -94,8 +95,8 @@ int main( int argc, char *argv[] )
       off_t filesize, offset;
 #endif
 
-    memset( &cipher_ctx, 0, sizeof( cipher_context_t ));
-    memset( &md_ctx, 0, sizeof( md_context_t ));
+    cipher_init( &cipher_ctx );
+    md_init( &md_ctx );
 
     /*
      * Parse the command-line arguments.
@@ -167,7 +168,11 @@ int main( int argc, char *argv[] )
         fprintf( stderr, "Cipher '%s' not found\n", argv[4] );
         goto exit;
     }
-    cipher_init_ctx( &cipher_ctx, cipher_info);
+    if( ( ret = cipher_init_ctx( &cipher_ctx, cipher_info) ) != 0 )
+    {
+        fprintf( stderr, "cipher_init_ctx failed\n" );
+        goto exit;
+    }
 
     md_info = md_info_from_string( argv[5] );
     if( md_info == NULL )
@@ -306,7 +311,12 @@ int main( int argc, char *argv[] )
             fprintf( stderr, "cipher_setkey() returned error\n");
             goto exit;
         }
-        if( cipher_reset( &cipher_ctx, IV ) != 0 )
+        if( cipher_set_iv( &cipher_ctx, IV, 16 ) != 0 )
+        {
+            fprintf( stderr, "cipher_set_iv() returned error\n");
+            goto exit;
+        }
+        if( cipher_reset( &cipher_ctx ) != 0 )
         {
             fprintf( stderr, "cipher_reset() returned error\n");
             goto exit;
@@ -324,11 +334,16 @@ int main( int argc, char *argv[] )
 
             if( fread( buffer, 1, ilen, fin ) != ilen )
             {
-                fprintf( stderr, "fread(%ld bytes) failed\n", (long) n );
+                fprintf( stderr, "fread(%ld bytes) failed\n", (long) ilen );
                 goto exit;
             }
 
-            cipher_update( &cipher_ctx, buffer, ilen, output, &olen );
+            if( cipher_update( &cipher_ctx, buffer, ilen, output, &olen ) != 0 )
+            {
+                fprintf( stderr, "cipher_update() returned error\n");
+                goto exit;
+            }
+
             md_hmac_update( &md_ctx, output, olen );
 
             if( fwrite( output, 1, olen, fout ) != olen )
@@ -389,7 +404,7 @@ int main( int argc, char *argv[] )
         }
 
         /*
-         * Substract the IV + HMAC length.
+         * Subtract the IV + HMAC length.
          */
         filesize -= ( 16 + md_get_size( md_info ) );
 
@@ -422,9 +437,24 @@ int main( int argc, char *argv[] )
 
         memset( key, 0, sizeof( key ) );
 
-        cipher_setkey( &cipher_ctx, digest, cipher_info->key_length,
-            POLARSSL_DECRYPT );
-        cipher_reset( &cipher_ctx, IV);
+        if( cipher_setkey( &cipher_ctx, digest, cipher_info->key_length,
+                           POLARSSL_DECRYPT ) != 0 )
+        {
+            fprintf( stderr, "cipher_setkey() returned error\n" );
+            goto exit;
+        }
+
+        if( cipher_set_iv( &cipher_ctx, IV, 16 ) != 0 )
+        {
+            fprintf( stderr, "cipher_set_iv() returned error\n" );
+            goto exit;
+        }
+
+        if( cipher_reset( &cipher_ctx ) != 0 )
+        {
+            fprintf( stderr, "cipher_reset() returned error\n" );
+            goto exit;
+        }
 
         md_hmac_starts( &md_ctx, digest, 32 );
 
@@ -442,25 +472,19 @@ int main( int argc, char *argv[] )
             }
 
             md_hmac_update( &md_ctx, buffer, cipher_get_block_size( &cipher_ctx ) );
-            cipher_update( &cipher_ctx, buffer, cipher_get_block_size( &cipher_ctx ),
-                output, &olen );
+            if( cipher_update( &cipher_ctx, buffer,
+                               cipher_get_block_size( &cipher_ctx ),
+                               output, &olen ) != 0 )
+            {
+                fprintf( stderr, "cipher_update() returned error\n" );
+                goto exit;
+            }
 
             if( fwrite( output, 1, olen, fout ) != olen )
             {
                 fprintf( stderr, "fwrite(%ld bytes) failed\n", (long) olen );
                 goto exit;
             }
-        }
-
-        /*
-         * Write the final block of data
-         */
-        cipher_finish( &cipher_ctx, output, &olen );
-
-        if( fwrite( output, 1, olen, fout ) != olen )
-        {
-            fprintf( stderr, "fwrite(%ld bytes) failed\n", (long) olen );
-            goto exit;
         }
 
         /*
@@ -474,10 +498,26 @@ int main( int argc, char *argv[] )
             goto exit;
         }
 
-        if( memcmp( digest, buffer, md_get_size( md_info ) ) != 0 )
+        /* Use constant-time buffer comparison */
+        diff = 0;
+        for( i = 0; i < md_get_size( md_info ); i++ )
+            diff |= digest[i] ^ buffer[i];
+
+        if( diff != 0 )
         {
             fprintf( stderr, "HMAC check failed: wrong key, "
                              "or file corrupted.\n" );
+            goto exit;
+        }
+
+        /*
+         * Write the final block of data
+         */
+        cipher_finish( &cipher_ctx, output, &olen );
+
+        if( fwrite( output, 1, olen, fout ) != olen )
+        {
+            fprintf( stderr, "fwrite(%ld bytes) failed\n", (long) olen );
             goto exit;
         }
     }
@@ -493,8 +533,8 @@ exit:
     memset( buffer, 0, sizeof( buffer ) );
     memset( digest, 0, sizeof( digest ) );
 
-    cipher_free_ctx( &cipher_ctx );
-    md_free_ctx( &md_ctx );
+    cipher_free( &cipher_ctx );
+    md_free( &md_ctx );
 
     return( ret );
 }

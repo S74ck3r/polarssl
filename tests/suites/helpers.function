@@ -1,4 +1,13 @@
-#include <polarssl/config.h>
+#if defined(POLARSSL_MEMORY_BUFFER_ALLOC_C)
+#include "polarssl/memory.h"
+#endif
+
+#if defined(POLARSSL_PLATFORM_C)
+#include "polarssl/platform.h"
+#else
+#define polarssl_malloc     malloc
+#define polarssl_free       free
+#endif
 
 #ifdef _MSC_VER
 #include <basetsd.h>
@@ -6,6 +15,10 @@ typedef UINT32 uint32_t;
 #else
 #include <inttypes.h>
 #endif
+
+#include <assert.h>
+#include <stdlib.h>
+#include <string.h>
 
 /*
  * 32-bit integer manipulation macros (big endian)
@@ -30,7 +43,7 @@ typedef UINT32 uint32_t;
 }
 #endif
 
-int unhexify(unsigned char *obuf, const char *ibuf)
+static int unhexify(unsigned char *obuf, const char *ibuf)
 {
     unsigned char c, c2;
     int len = strlen(ibuf) / 2;
@@ -64,7 +77,7 @@ int unhexify(unsigned char *obuf, const char *ibuf)
     return len;
 }
 
-void hexify(unsigned char *obuf, const unsigned char *ibuf, int len)
+static void hexify(unsigned char *obuf, const unsigned char *ibuf, int len)
 {
     unsigned char l, h;
 
@@ -89,6 +102,53 @@ void hexify(unsigned char *obuf, const unsigned char *ibuf, int len)
 }
 
 /**
+ * Allocate and zeroize a buffer.
+ *
+ * If the size if zero, a pointer to a zeroized 1-byte buffer is returned.
+ *
+ * For convenience, dies if allocation fails.
+ */
+static unsigned char *zero_alloc( size_t len )
+{
+    void *p;
+    size_t actual_len = len != 0 ? len : 1;
+
+    p = polarssl_malloc( actual_len );
+    assert( p != NULL );
+
+    memset( p, 0x00, actual_len );
+
+    return( p );
+}
+
+/**
+ * Allocate and fill a buffer from hex data.
+ *
+ * The buffer is sized exactly as needed. This allows to detect buffer
+ * overruns (including overreads) when running the test suite under valgrind.
+ *
+ * If the size if zero, a pointer to a zeroized 1-byte buffer is returned.
+ *
+ * For convenience, dies if allocation fails.
+ */
+static unsigned char *unhexify_alloc( const char *ibuf, size_t *olen )
+{
+    unsigned char *obuf;
+
+    *olen = strlen(ibuf) / 2;
+
+    if( *olen == 0 )
+        return( zero_alloc( *olen ) );
+
+    obuf = polarssl_malloc( *olen );
+    assert( obuf != NULL );
+
+    (void) unhexify( obuf, ibuf );
+
+    return( obuf );
+}
+
+/**
  * This function just returns data from rand().
  * Although predictable and often similar on multiple
  * runs, this does not result in identical random on
@@ -99,6 +159,7 @@ void hexify(unsigned char *obuf, const unsigned char *ibuf, int len)
  */
 static int rnd_std_rand( void *rng_state, unsigned char *output, size_t len )
 {
+#if !defined(__OpenBSD__)
     size_t i;
 
     if( rng_state != NULL )
@@ -106,6 +167,12 @@ static int rnd_std_rand( void *rng_state, unsigned char *output, size_t len )
 
     for( i = 0; i < len; ++i )
         output[i] = rand();
+#else
+    if( rng_state != NULL )
+        rng_state = NULL;
+
+    arc4random_buf( output, len );
+#endif /* !OpenBSD */
 
     return( 0 );
 }
@@ -192,7 +259,7 @@ static int rnd_pseudo_rand( void *rng_state, unsigned char *output, size_t len )
 {
     rnd_pseudo_info *info = (rnd_pseudo_info *) rng_state;
     uint32_t i, *k, sum, delta=0x9E3779B9;
-    unsigned char result[4];
+    unsigned char result[4], *out = output;
 
     if( rng_state == NULL )
         return( rnd_std_rand( NULL, output, len ) );
@@ -212,8 +279,9 @@ static int rnd_pseudo_rand( void *rng_state, unsigned char *output, size_t len )
         }
 
         PUT_UINT32_BE( info->v0, result, 0 );
-        memcpy( output, result, use_len );
+        memcpy( out, result, use_len );
         len -= use_len;
+        out += 4;
     }
 
     return( 0 );
